@@ -9,6 +9,7 @@
 #define MASTER 0
 #define PROCESS_SUBSTRING_PART 1
 #define PROCESS_CONNECTION_PART 2
+#define MILLION 1000000L
 #if 0
 void stringMatchingBruteForce(const char* text, const char* pattern) {
     std::cout << "stringMatchingBruteForce" << std::endl;
@@ -48,11 +49,11 @@ void storeText(char *text, char *msg, int offset, int len);
 int *getRealIndex(std::vector<int> *answer, int rank, int length, int patternLen, int *realLength);
 void daklak(int *finalResult, int *result, int size);
 
-int textLen = 20;
+int textLen = 65000;
 
 int main(int argc, char **argv)
 {
-
+    double start = 0, stop = 0;
     int rank, nproc;
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &nproc);
@@ -63,8 +64,15 @@ int main(int argc, char **argv)
     std::cout << "Ten processer thu " << rank << ": " << nameProcess << std::endl;
     MPI_Barrier(MPI_COMM_WORLD);
 
-    char *pattern = "ab";
-    int patternlen = strlen(pattern);
+    char *pattern;
+    FILE *patFile = fopen("pattern.txt", "r");
+    fseek(patFile, 0, SEEK_END);
+    int patternlen = (int)ftell(patFile);
+    rewind(patFile);
+    fgets(pattern, patternlen, patFile);
+    fclose(patFile);
+    free(patFile);
+
 
     int subtextLenPerProc = textLen / nproc;
     int subtextStartPosition = textLen / nproc;
@@ -77,14 +85,17 @@ int main(int argc, char **argv)
     text[0] = '\0';
     if (rank == MASTER)
     {
+        start = MPI_Wtime();
         //khoi tao du lieu
-        char *fullText = new char;
+        char *fullText = (char *)malloc(textLen * sizeof(char));
         FILE *textFile = fopen("text.txt", "r");
         fgets(fullText, textLen, textFile);
+
         fclose(textFile);
         free(textFile);
         // strncpy(fullText, "ab1ab2ab3ab4ab5ab6", textLen);
-        std::cout << "Full Text: " << fullText << std::endl;
+        int sizes = strlen(fullText);
+        std::cout << sizes << std::endl;
         std::cout << "SubText Length per proces:" << subtextLenPerProc << std::endl;
         std::cout << "Pattern Length per proces:" << patternlen << std::endl;
 
@@ -131,8 +142,11 @@ int main(int argc, char **argv)
     //     }
     // }
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    free(sendMsg);
+    free(recvMsg);
     //send connection part
-    char *tailText = new char[patternlen - 1 + 1]();
+    char *tailText = new char[patternlen - 1 + 1];
     tailText[patternlen] = '\0';
     if (rank != MASTER)
     {
@@ -145,13 +159,13 @@ int main(int argc, char **argv)
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
-    for (int i = 0; i < nproc; i++)
-    {
-        if (i == rank)
-        {
-            std::cout << "Rank: " << rank << " text: " << text << std::endl;
-        }
-    }
+    // for (int i = 0; i < nproc; i++)
+    // {
+    //     if (i == rank)
+    //     {
+    //         std::cout << "Rank: " << rank << " text: " << text << std::endl;
+    //     }
+    // }
 
     std::vector<int> *answer = stringMatchingKMP(text, pattern);
     //IN VI TRI
@@ -176,10 +190,12 @@ int main(int argc, char **argv)
     if (rank != MASTER)
     {
         MPI_Send(result, realLength, MPI_INT, MASTER, 3, MPI_COMM_WORLD);
+        free(answer);
+        free(result);
     }
     else
     {
-        int *finalResult = new int[textLen]();
+        int *finalResult = new int[textLen];
         daklak(finalResult, result, realLength);
 
         free(answer);
@@ -193,23 +209,35 @@ int main(int argc, char **argv)
             }
             MPI_Recv(result, end + patternlen - 1, MPI_INT, i, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             daklak(finalResult, result, end + patternlen - 1);
+            free(result);
         }
-        free(result);
-        printf("\n***\nKet qua: \n");
+        stop = MPI_Wtime();
+        printf("\n***\nVới %d processors, thời gian chạy sẽ là %.3f milisecs: \n", nproc, (stop - start) * 1000);
+        int found = 0;
+        bool foundd = false;
         for (int j = 0; j < textLen; j++)
         {
             if (finalResult[j] == 1)
+            {
                 printf("Find a matching substring starting at: %d.\n", j);
+                found++;
+                foundd = true;
+            }
         }
-        printf("\n");
+        if (!foundd)
+        {
+            std::cout << "404" << std::endl;
+        }
+        printf("Số lần phát hiện là %d\n", found);
     }
     MPI_Finalize();
 }
+
 std::vector<int> *stringMatchingKMP(const char *string, const char *pattern)
 {
     int stringLen = strlen(string);
     int patternLen = strlen(pattern);
-    int *lps = new int[patternLen]();
+    int *lps = new int[patternLen];
     std::vector<int> *answer = new std::vector<int>();
     generateLps(pattern, lps, patternLen);
     bool found = false;
